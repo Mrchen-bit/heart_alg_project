@@ -1,0 +1,114 @@
+﻿/* =========================================================================
+   医疗数据中台 - 适配暗黑模式高对比主题 (Dark High-Contrast Theme)
+   ========================================================================= */
+
+/* --- 1. 全局背景与文本 --- */
+.stApp {
+    background-color: #0E1117 !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    color: #E2E8F0 !important;
+}
+
+p, span, label, div {
+    color: #E2E8F0 !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #FFFFFF !important;
+    font-weight: 600;
+}
+
+/* --- 2. 侧边栏 --- */
+[data-testid="stSidebar"] {
+    background-color: #1A202C !important;
+    border-right: 1px solid #2D3748 !important;
+}
+
+[data-testid="stSidebar"] * {
+    color: #E2E8F0 !important; 
+}
+
+/* --- 3. 上传组件 (File Uploader) --- */
+[data-testid="stFileUploadDropzone"] {
+    background-color: #2D3748 !important;
+    border: 2px dashed #4FD1C5 !important;
+    border-radius: 12px !important;
+}
+[data-testid="stFileUploadDropzone"]:hover {
+    background-color: #285E61 !important;
+}
+[data-testid="stFileUploadDropzone"] button {
+    background-color: #4A5568 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #718096 !important;
+}
+
+/* --- 4. 输入框和下拉框 (Inputs) --- */
+div[data-baseweb="select"] > div, 
+input[type="number"], 
+input[type="text"] {
+    background-color: #1A202C !important;
+    color: #FFFFFF !important;
+    border: 1px solid #4A5568 !important;
+}
+div[data-baseweb="select"]:hover > div, 
+input[type="number"]:hover, 
+input[type="text"]:hover {
+    border-color: #4FD1C5 !important;
+}
+div[data-baseweb="popover"] > div {
+    background-color: #2D3748 !important;
+    color: #FFFFFF !important;
+}
+
+/* --- 5. 按钮高亮 --- */
+.stButton > button {
+    background: linear-gradient(135deg, #3182CE 0%, #2B6CB0 100%) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+}
+.stButton > button * {
+    color: #FFFFFF !important;
+}
+.stButton > button:hover {
+    background: linear-gradient(135deg, #2B6CB0 0%, #2C5282 100%) !important;
+    box-shadow: 0 4px 12px rgba(49, 130, 206, 0.5) !important;
+}
+[data-testid="stSidebar"] .stButton > button {
+    background: linear-gradient(135deg, #38B2AC 0%, #319795 100%) !important;
+}
+
+/* --- 6. 数据卡片 (Metric Cards) --- */
+.metric-card {
+    background: #1A202C;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    border: 1px solid #2D3748;
+    border-top: 5px solid #4FD1C5;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+    margin-bottom: 24px;
+}
+.metric-card h3 {
+    color: #A0AEC0 !important;
+    font-size: 1rem !important;
+    margin: 0 0 12px 0 !important;
+}
+.metric-card h2 {
+    color: #63B3ED !important;
+    font-size: 2.6rem !important;
+    margin: 0 !important;
+    font-weight: 800 !important;
+}
+.metric-card span {
+    color: #A0AEC0 !important;
+}
+
+/* --- 7. 表单 --- */
+[data-testid="stForm"] {
+    background-color: #1A202C !important;
+    border: 1px solid #2D3748 !important;
+    border-radius: 16px !important;
+}
