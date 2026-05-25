@@ -1,141 +1,287 @@
 ﻿import streamlit as st
 import pandas as pd
+import numpy as np
 import os
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit.components.v1 as components
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from mlxtend.frequent_patterns import apriori, association_rules
 
-st.set_page_config(
-    page_title="心脏病智能分析与预测",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-def load_css(file_name):
-    with open(file_name, 'r', encoding='utf-8') as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-css_path = os.path.join(os.path.dirname(__file__), "style.css")
-if os.path.exists(css_path):
-    load_css(css_path)
+st.set_page_config(page_title="心脏病智能分析与预测", layout="wide", initial_sidebar_state="expanded")
 
 DATA_DIR = "data"
-RAW_DATA_PATH = os.path.join(DATA_DIR, "raw_heart.csv")
 CLEANED_DATA_PATH = os.path.join(DATA_DIR, "cleaned_heart.csv")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+@st.cache_data
+def load_data():
+    if os.path.exists(CLEANED_DATA_PATH):
+        df = pd.read_csv(CLEANED_DATA_PATH)
+        df.columns = df.columns.str.lower()
+        return df
+    return None
+
+@st.cache_resource
+def train_model(df):
+    feature_cols = ['age', 'sex', 'cp', 'trestbps', 'chol', 'fbs', 'restecg',
+                    'thalach', 'exang', 'oldpeak', 'slope', 'ca', 'thal']
+    X = df[feature_cols]
+    y = df['target']
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_scaled, y)
+    return model, scaler, feature_cols
+
+def save_uploaded_data(uploaded_file):
+    df = pd.read_csv(uploaded_file)
+    df.columns = df.columns.str.lower()
+    df.dropna(inplace=True)
+    df.to_csv(CLEANED_DATA_PATH, index=False)
+    return df
+
+def aggregate_by_age(df):
+    bins = [0, 40, 50, 60, 120]
+    labels = ['<40', '40-49', '50-59', '60+']
+    df['age_group'] = pd.cut(df['age'], bins=bins, labels=labels, right=False)
+    age_risk = df.groupby('age_group')['target'].mean().reset_index()
+    age_risk.columns = ['年龄段', '患病率']
+    return age_risk
+
+def gender_risk(df):
+    gender_risk = df.groupby('sex')['target'].mean().reset_index()
+    gender_risk['sex'] = gender_risk['sex'].map({1: '男性', 0: '女性'})
+    return gender_risk
+
+def chest_pain_risk(df):
+    cp_risk = df.groupby('cp')['target'].mean().reset_index()
+    cp_risk['cp'] = cp_risk['cp'].map({0: '典型心绞痛', 1: '非典型心绞痛', 2: '非心绞痛', 3: '无症状'})
+    return cp_risk
+
+def run_apriori_rules(df, min_support, min_confidence):
+    df_temp = df.copy()
+    df_temp['age>50'] = (df_temp['age'] > 50).astype(int)
+    df_temp['high_bp'] = (df_temp['trestbps'] > 140).astype(int)
+    df_temp['high_chol'] = (df_temp['chol'] > 240).astype(int)
+    df_temp['chest_pain_risk'] = (df_temp['cp'].isin([2,3])).astype(int)
+    df_temp['target_1'] = df_temp['target']
+    feature_cols = ['age>50', 'high_bp', 'high_chol', 'chest_pain_risk', 'target_1']
+    basket = df_temp[feature_cols]
+    frequent_itemsets = apriori(basket, min_support=min_support, use_colnames=True)
+    if len(frequent_itemsets) == 0:
+        return pd.DataFrame()
+    rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
+    if len(rules) == 0:
+        return pd.DataFrame()
+    rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
+    rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
+    result = rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']]
+    result = result[result['consequents'].str.contains('target_1')]
+    return result
 
 def main():
     with st.sidebar:
-        st.markdown("<h2 style='text-align: center; color: #4FD1C5;'>医疗数据中台</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center; color: #1e293b;'>医疗数据中台</h2>", unsafe_allow_html=True)
         st.markdown("---")
         st.subheader("数据接入与预处理")
-        st.write("请上传原始心脏病数据集进行清洗入库。")
-        
         uploaded_file = st.file_uploader("上传 CSV 数据集", type=['csv'])
-        
         if st.button("重新导入与清洗 (ETL)", use_container_width=True):
-            with st.spinner("正在加载、清洗并写入数据库..."):
-                st.success("数据处理完毕已入库！")
-                st.info("提示: 数据库心血管特征指标已更新。")
+            if uploaded_file is not None:
+                with st.spinner("正在加载、清洗并写入数据库..."):
+                    df = save_uploaded_data(uploaded_file)
+                    st.success(f"数据处理完毕！共 {len(df)} 条记录已入库。")
+                    st.rerun()
+            else:
+                st.error("请先上传 CSV 文件。")
+        st.markdown("---")
+        st.caption("当前数据集：cleaned_heart.csv（若存在）")
+        # 提供备用渲染选项，解决图表不显示问题
+        use_html_fallback = st.checkbox("使用 HTML 渲染（解决图表不显示问题）", value=False)
 
-    st.markdown("<h1 style='color: #63B3ED;'>心脏病数据仓库与智能挖掘系统</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #E2E8F0; font-size: 1.1rem;'>基于多维数据建模，支持高级聚合查询、Apriori 关联规则挖掘以及机器学习风险预测。</p>", unsafe_allow_html=True)
-    
+    st.markdown("<h1 style='color: #1e293b;'>心脏病数据仓库与智能挖掘系统</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #334155; font-size: 1.1rem;'>基于多维数据建模，支持高级聚合查询、Apriori 关联规则挖掘以及机器学习风险预测。</p>", unsafe_allow_html=True)
+
+    df = load_data()
+    if df is None:
+        st.warning("⚠️ 未找到清洗后的数据文件。请通过侧边栏上传 CSV 文件并点击“重新导入与清洗”。")
+        st.stop()
+
+    total = len(df)
+    prevalence = df['target'].mean() * 100
+    avg_age = df['age'].mean()
     col1, col2, col3 = st.columns(3)
-    col1.markdown('<div class="metric-card"><h3>当前数据总量</h3><h2>303 <span style="font-size:1rem;">条</span></h2></div>', unsafe_allow_html=True)
-    col2.markdown('<div class="metric-card"><h3>总体患病率</h3><h2>54.5 <span style="font-size:1rem;">%</span></h2></div>', unsafe_allow_html=True)
-    col3.markdown('<div class="metric-card"><h3>患者平均年龄</h3><h2>54 <span style="font-size:1rem;">岁</span></h2></div>', unsafe_allow_html=True)
-
+    col1.metric("当前数据总量", f"{total} 条")
+    col2.metric("总体患病率", f"{prevalence:.1f}%")
+    col3.metric("患者平均年龄", f"{avg_age:.0f} 岁")
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs([
-        "聚合分析与可视化", 
-        "关联规则挖掘", 
-        "风险预测模型"
-    ])
+    tab1, tab2, tab3 = st.tabs(["📊 聚合分析与可视化", "🔗 关联规则挖掘", "🤖 风险预测模型"])
 
     with tab1:
         st.subheader("多维数据集计与透视")
         st.markdown("通过数据仓库的多维模型展示关键特征对心脏病风险的影响。")
-        
-        if st.button("生成聚合分析图表"):
-            with st.spinner("查询数据中..."):
-                st.info("图表已成功生成")
-                col_chart1, col_chart2 = st.columns(2)
-                
-                with col_chart1:
-                    fig1 = go.Figure(data=[go.Bar(x=['30-40', '40-50', '50-60', '60+'], y=[10, 30, 45, 15], marker_color='#4FD1C5')])
-                    fig1.update_layout(title="不同年龄段患病率分布", margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#E2E8F0'))
-                    st.plotly_chart(fig1, use_container_width=True)
-                
-                with col_chart2:
-                    fig2 = px.pie(names=['男性', '女性'], values=[68, 32], color_discrete_sequence=['#4FD1C5', '#3182CE'])
-                    fig2.update_layout(title="患病人群性别占比", margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#E2E8F0'))
-                    st.plotly_chart(fig2, use_container_width=True)
+        analysis_type = st.selectbox("选择聚合维度", ["年龄段患病率", "性别患病率", "胸痛类型患病率", "自定义交叉分析"])
+        if analysis_type == "年龄段患病率":
+            age_risk = aggregate_by_age(df)
+            fig = px.bar(age_risk, x='年龄段', y='患病率', title="不同年龄段患病率分布", color='患病率', color_continuous_scale='Blues')
+            fig.update_layout(template='simple_white', height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        elif analysis_type == "性别患病率":
+            gender_risk_df = gender_risk(df)
+            fig = px.bar(gender_risk_df, x='sex', y='target', title="性别与患病率", color='target', color_continuous_scale='Blues')
+            fig.update_layout(template='simple_white', height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        elif analysis_type == "胸痛类型患病率":
+            cp_risk_df = chest_pain_risk(df)
+            fig = px.bar(cp_risk_df, x='cp', y='target', title="胸痛类型与患病率", color='target', color_continuous_scale='Blues')
+            fig.update_layout(template='simple_white', height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.markdown("#### 选择特征与患病率的关系可视化")
+            col_x = st.selectbox("选择特征 (X轴)", options=['age', 'trestbps', 'chol', 'thalach', 'oldpeak'], index=0)
+            chart_type = st.radio("图表类型", ["箱线图 (Boxplot)", "直方图 (Histogram)", "散点图 + 抖动"])
+
+            df_plot = df.copy()
+            df_plot['target_str'] = df_plot['target'].map({0: '健康', 1: '患病'})
+
+            if col_x not in df_plot.columns:
+                st.error(f"数据中未找到列: {col_x}")
+            else:
+                # 转换数值
+                if df_plot[col_x].dtype == 'object':
+                    df_plot[col_x] = df_plot[col_x].astype(str).str.strip()
+                df_plot[col_x] = pd.to_numeric(df_plot[col_x], errors='coerce')
+                valid_count = df_plot[col_x].notna().sum()
+
+                if valid_count == 0:
+                    st.error(f"❌ 特征列 '{col_x}' 无法转换为数值（有效数据为0），无法绘图。")
+                    st.write("原始列部分值:", df[col_x].dropna().head(10).tolist())
+                else:
+                    st.info(f"✅ 有效数据量: {valid_count} / {len(df_plot)}（已自动将非数值转为NaN）")
+                    if valid_count / len(df_plot) < 0.1:
+                        st.warning(f"有效数据占比很低 ({valid_count/len(df_plot):.1%})，图表可能稀疏。")
+
+                    try:
+                        if chart_type == "箱线图 (Boxplot)":
+                            fig = px.box(
+                                df_plot,
+                                x='target_str',
+                                y=col_x,
+                                color='target_str',
+                                title=f"{col_x} 按患病与否的分布",
+                                labels={'target_str': '患病 (健康/患病)', col_x: col_x},
+                                color_discrete_map={'健康': '#3182ce', '患病': '#e53e3e'}
+                            )
+                        elif chart_type == "直方图 (Histogram)":
+                            fig = px.histogram(
+                                df_plot,
+                                x=col_x,
+                                color='target_str',
+                                nbins=30,
+                                title=f"{col_x} 分布的患病对比",
+                                labels={col_x: col_x, 'count': '频数'},
+                                barmode='overlay',
+                                opacity=0.6,
+                                color_discrete_map={'健康': '#3182ce', '患病': '#e53e3e'}
+                            )
+                        else:
+                            np.random.seed(42)
+                            df_plot['target_jitter'] = df_plot['target'] + np.random.uniform(-0.08, 0.08, size=len(df_plot))
+                            fig = px.scatter(
+                                df_plot,
+                                x=col_x,
+                                y='target_jitter',
+                                color='target_str',
+                                title=f"{col_x} 与患病关系 (抖动散点图)",
+                                labels={col_x: col_x, 'target_jitter': '患病 (抖动值)'},
+                                opacity=0.5,
+                                color_discrete_map={'健康': '#3182ce', '患病': '#e53e3e'}
+                            )
+                            fig.update_layout(
+                                yaxis=dict(tickvals=[0, 1], ticktext=['健康 (0)', '患病 (1)'])
+                            )
+                        # 强制设置高度，确保可见
+                        fig.update_layout(template='simple_white', height=500)
+
+                        # 检查是否有数据轨迹
+                        if len(fig.data) == 0:
+                            st.warning("生成的图表没有任何数据轨迹，可能是由于数据过滤或数值问题。")
+                        else:
+                            # 根据用户选择使用渲染方式
+                            if use_html_fallback:
+                                # 使用 HTML 组件渲染（绕过 Streamlit 的渲染问题）
+                                html_str = fig.to_html(include_plotlyjs='cdn', full_html=False)
+                                components.html(html_str, height=550)
+                            else:
+                                st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"绘图出错: {e}")
+                        st.exception(e)
+
+        with st.expander("查看原始数据样本"):
+            st.dataframe(df.head(10), use_container_width=True)
 
     with tab2:
         st.subheader("基于 Apriori 的指标准则发现")
-        st.markdown("发现各项生理指标与患病之间的强关联规则（如 高血压 + 高胆固醇 => 心脏病）。")
-        
+        st.markdown("发现各项生理指标与患病之间的强关联规则")
         with st.expander("算法参数设置", expanded=True):
             col_a, col_b = st.columns(2)
             with col_a:
-                min_support = st.slider("最小支持度 (Min Support)", 0.01, 1.0, 0.1)
+                min_support = st.slider("最小支持度", 0.01, 0.5, 0.05, 0.01)
             with col_b:
-                min_confidence = st.slider("最小置信度 (Min Confidence)", 0.1, 1.0, 0.6)
-
-        if st.button("执行关联规则挖掘"):
+                min_confidence = st.slider("最小置信度", 0.1, 1.0, 0.7, 0.05)
+        if st.button("执行关联规则挖掘", use_container_width=True):
             with st.spinner("正在发掘强关联规则..."):
-                st.success(f"挖掘完成！找到符合支持度>{min_support} 及置信度>{min_confidence} 的规则。")
-                
-                demo_rules = pd.DataFrame({
-                    "前提 (Antecedents)": ["高血压", "年龄>60, 胸痛类型=典型"],
-                    "结论 (Consequents)": ["患病=1", "患病=1"],
-                    "支持度 (Support)": [0.15, 0.12],
-                    "置信度 (Confidence)": [0.85, 0.92],
-                    "提升度 (Lift)": [1.5, 1.7]
-                })
-                st.dataframe(demo_rules, use_container_width=True, hide_index=True)
-                st.download_button("导出规则为 CSV", data="xxx", file_name="rules.csv")
+                try:
+                    rules_df = run_apriori_rules(df, min_support, min_confidence)
+                    if rules_df.empty:
+                        st.warning("未找到符合条件的关联规则，请尝试降低支持度或置信度阈值。")
+                    else:
+                        st.success(f"挖掘完成！找到 {len(rules_df)} 条规则。")
+                        st.dataframe(rules_df, use_container_width=True)
+                        csv = rules_df.to_csv(index=False).encode('utf-8')
+                        st.download_button("导出规则为 CSV", data=csv, file_name="rules.csv", mime="text/csv")
+                except Exception as e:
+                    st.error(f"挖掘出错: {e}")
 
     with tab3:
         st.subheader("患者风险智能预估")
-        st.markdown("输入患者当期检测指标，利用随机森林分类器预测潜在的心血管疾病风险。")
-        
-        with st.form("risk_prediction_form"):
-            col_p1, col_p2, col_p3 = st.columns(3)
-            
-            with col_p1:
-                age = st.number_input("年龄 (Age)", min_value=1, max_value=120, value=50)
-                sex = st.selectbox("性别 (Sex)", options=[1, 0], format_func=lambda x: "男 (1)" if x == 1 else "女 (0)")
-                cp = st.selectbox("胸痛类型 (CP)", options=[0, 1, 2, 3])
-                trestbps = st.number_input("静息血压 (Trestbps)", value=120)
-                
-            with col_p2:
-                chol = st.number_input("胆固醇 (Chol)", value=200)
-                fbs = st.selectbox("空腹血糖 > 120 mg/dl (FBS)", options=[0, 1])
-                restecg = st.selectbox("静息心电图 (RestECG)", options=[0, 1, 2])
-                thalach = st.number_input("最大心率 (Thalach)", value=150)
-                
-            with col_p3:
-                exang = st.selectbox("运动引发心绞痛 (Exang)", options=[0, 1])
-                oldpeak = st.number_input("ST段压低 (Oldpeak)", value=1.0, step=0.1)
-                slope = st.selectbox("ST段斜率 (Slope)", options=[0, 1, 2])
-                ca = st.selectbox("主要血管数 (CA)", options=[0, 1, 2, 3, 4])
-                thal = st.selectbox("地中海贫血 (Thal)", options=[0, 1, 2, 3])
-                
-            submit_pred = st.form_submit_button("开始智能预测", use_container_width=True)
-            
-        if submit_pred:
-            with st.spinner("AI模型正在评估..."):
-                risk_prob = 0.82 
-                st.markdown("### 评估结果")
-                if risk_prob > 0.5:
-                    st.error(f"高风险警告！预测患病概率为 {risk_prob:.1%}")
-                    st.toast('发现高风险指标，请注意防范！')
+        st.markdown("输入患者当期检测指标，利用随机森林分类器预测心血管疾病风险。")
+        with st.spinner("正在训练预测模型..."):
+            model, scaler, feature_cols = train_model(df)
+        with st.form("risk_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                age = st.number_input("年龄", 1, 120, 50)
+                sex = st.selectbox("性别", [1,0], format_func=lambda x: "男" if x else "女")
+                cp = st.selectbox("胸痛类型", [0,1,2,3], format_func=lambda x: ["典型心绞痛","非典型心绞痛","非心绞痛","无症状"][x])
+                trestbps = st.number_input("静息血压", 80, 250, 120)
+            with col2:
+                chol = st.number_input("胆固醇", 100, 600, 200)
+                fbs = st.selectbox("空腹血糖>120", [0,1], format_func=lambda x: "是" if x else "否")
+                restecg = st.selectbox("静息心电图", [0,1,2])
+                thalach = st.number_input("最大心率", 60, 220, 150)
+            with col3:
+                exang = st.selectbox("运动诱发心绞痛", [0,1], format_func=lambda x: "是" if x else "否")
+                oldpeak = st.number_input("ST段压低", 0.0, 10.0, 1.0, 0.1)
+                slope = st.selectbox("ST段斜率", [0,1,2])
+                ca = st.selectbox("主要血管数", [0,1,2,3,4])
+                thal = st.selectbox("地中海贫血", [0,1,2,3])
+            submitted = st.form_submit_button("开始智能预测", use_container_width=True)
+            if submitted:
+                input_arr = np.array([[age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal]])
+                input_scaled = scaler.transform(input_arr)
+                prob = model.predict_proba(input_scaled)[0][1]
+                st.metric("预测患病风险", f"{prob:.1%}")
+                st.progress(prob)
+                if prob > 0.5:
+                    st.error(f"⚠️ 高风险！患病概率 {prob:.1%}")
+                    st.toast("请注意防范！", icon="⚠️")
                 else:
-                    st.success(f"状况良好，患病概率为 {risk_prob:.1%}")
+                    st.success(f"✅ 低风险，患病概率 {prob:.1%}")
                     st.balloons()
-                    
-                st.progress(risk_prob)
 
 if __name__ == "__main__":
     main()
