@@ -7,5 +7,6 @@
 from . import aggregation
 from . import association
 from . import db_utils
+from . import classification
 
-__all__ = ["aggregation", "association", "db_utils"]
+__all__ = ["aggregation", "association", "db_utils", "classification"]
